@@ -1,0 +1,157 @@
+<html>
+<head>
+<title>Use service workers to pre-cache the App Shell</title>
+</head>
+<body>
+<p>Progressive Web Apps have to be fast, and installable, which means that they work online, offline, and on intermittent, slow connections. To achieve this, we need to cache our app shell using service worker, so that it&#39;s always available quickly and reliably.</p>
+<p>If you&#39;re unfamiliar with service workers, you can get a basic understanding by reading <a href="https://developers.google.com/web/fundamentals/primers/service-worker/" target="_blank">Introduction To Service Workers</a> about what they can do, how their lifecycle works and more. Once you&#39;ve completed this code lab, be sure to check out the <a href="http://goo.gl/jhXCBy" target="_blank">Debugging Service Workers code lab</a> for a more indepth look at how to work with service workers.</p>
+<p>Features provided via service workers should be considered a progressive enhancement, and added only if supported by the browser. For example, with service workers you can cache the app shell and data for your app, so that it&#39;s available even when the network isn&#39;t. When service workers aren&#39;t supported, the offline code isn&#39;t called, and the user gets a basic experience. Using feature detection to provide progressive enhancement has little overhead and it won&#39;t break in older browsers that don&#39;t support that feature.</p>
+<aside class="special"><p><strong>Remember</strong>: Service worker functionality is only available on pages that are accessed via HTTPS (http://localhost and equivalents will also work, to facilitate testing). To learn about the rationale behind this restriction check out <a href="http://www.chromium.org/Home/chromium-security/prefer-secure-origins-for-powerful-new-features" target="_blank">Prefer Secure Origins For Powerful New Features</a> from the Chromium team.</p>
+</aside>
+<h2><strong>Register the service worker if it&#39;s available</strong></h2>
+<p>The first step to making the app work offline is to register a service worker, a script that allows background functionality without the need for an open web page or user interaction.</p>
+<p>This takes two simple steps:</p>
+<ol type="1" start="1">
+<li>Tell the browser to register the JavaScript file as the service worker.</li>
+<li>Create a JavaScript file containing the service worker.</li>
+</ol>
+<p>First, we need to check if the browser supports service workers, and if it does, register the service worker. Add the following code to <code>app.js</code> (after the <code>// TODO add service worker code here</code> comment):</p>
+<pre><code>  if (&#39;serviceWorker&#39; in navigator) {
+    navigator.serviceWorker
+             .register(&#39;./service-worker.js&#39;)
+             .then(function() { console.log(&#39;Service Worker Registered&#39;); });
+  }</code></pre>
+<h2><strong>Cache the site assets</strong></h2>
+<p>When the service worker is registered, an install event is triggered the first time the user visits the page. In this event handler, we will cache all the assets that are needed for the application.</p>
+<aside class="warning"><p>The code below must NOT be used in production, it covers only the most basic use cases and it&#39;s easy to get yourself into a state where your app shell will never update. Be sure to review the section below that discusses the pitfalls of this implementation and how to avoid them.</p>
+</aside>
+<p>When the service worker is fired, it should open the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Cache" target="_blank"><code>caches</code></a> object and populate it with the assets necessary to load the App Shell. Create a file called <code>service-worker.js</code> in your application root folder (which should be <code>your-first-pwapp-master/work</code> directory). This file must live in the application root because the scope for service workers is defined by the directory in which the file resides. Add this code to your new <code>service-worker.js</code> file:</p>
+<pre><code>var cacheName = &#39;weatherPWA-step-6-1&#39;;
+var filesToCache = [];
+
+self.addEventListener(&#39;install&#39;, function(e) {
+  console.log(&#39;[ServiceWorker] Install&#39;);
+  e.waitUntil(
+    caches.open(cacheName).then(function(cache) {
+      console.log(&#39;[ServiceWorker] Caching app shell&#39;);
+      return cache.addAll(filesToCache);
+    })
+  );
+});</code></pre>
+<p>First, we need to open the cache with <code>caches.open()</code> and provide a cache name. Providing a cache name allows us to version files, or separate data from the app shell so that we can easily update one but not affect the other.</p>
+<p>Once the cache is open, we can then call <code>cache.addAll()</code>, which takes a list of URLs, then fetches them from the server and adds the response to the cache. Unfortunately, <code>cache.addAll()</code> is atomic, if any of the files fail, the entire cache step fails!</p>
+<p>Alright, let&#39;s start getting familiar with how you can use DevTools to understand and debug service workers. Before reloading your page, open up DevTools, go the <strong>Service Worker </strong>pane on the <strong>Application </strong>panel. It should look like this.</p>
+<p><img style="max-width: 624.00px" src="img/ed4633f91ec1389f.png"></p>
+<p>When you see a blank page like this, it means that the currently open page does not have any registered service workers.</p>
+<p>Now, reload your page. The Service Worker pane should now look like this.</p>
+<p><img style="max-width: 624.00px" src="img/bf15c2f18d7f945c.png"></p>
+<p>When you see information like this, it means the page has a service worker running.</p>
+<p>OK, now we&#39;re are going to take a brief detour and demonstrate a gotcha that you may encounter when developing service workers. To demonstrate, let&#39;s add an <code>activate</code> event listener below the <code>install</code> event listener in your <code>service-worker.js</code> file. </p>
+<pre><code>self.addEventListener(&#39;activate&#39;, function(e) {
+  console.log(&#39;[ServiceWorker] Activate&#39;);
+});</code></pre>
+<p>The <code>activate</code> event is fired when the service worker starts up.</p>
+<p>Open up the DevTools Console and reload the page, switch to the Service Worker pane in the Application panel and click inspect on the activated service worker. You expect to see the <code>[ServiceWorker] Activate</code> message logged to the console, but it didn&#39;t happen. Check out your Service Worker pane and you can see that the new service worker (that includes the activate event listener) appears to be in a &#34;waiting&#34; state.</p>
+<p><img style="max-width: 487.00px" src="img/1f454b6807700695.png"></p>
+<p>Basically, the old service worker continues to control the page as long as there is a tab open to the page. So, you <em>could </em>close and re-open the page or press the <strong>skipWaiting </strong>button, but a longer-term solution is to just enable the <strong>Update on Reload </strong>checkbox on the Service Worker pane of DevTools. When this checkbox is enabled, the service worker is forcibly updated every time that the page reloads.</p>
+<p>Enable the <strong>update on reload </strong>checkbox now and reload the page to confirm that the new service worker gets activated.</p>
+<p><strong>Note:</strong> You may see an error in the Service Worker pane of the Application panel similar to the one below, it&#39;s <strong>safe</strong> to ignore this error.</p>
+<p><img style="max-width: 424.00px" src="img/b1728ef310c444f5.png"></p>
+<p>That&#39;s all for now regarding inspecting and debugging service workers in DevTools. We&#39;ll show you some more tricks later. Let&#39;s get back to building your app.</p>
+<p>Let&#39;s expand on the <code>activate</code> event listener to include some logic to update the cache. Update your code to match the code below.</p>
+<pre><code>self.addEventListener(&#39;activate&#39;, function(e) {
+  console.log(&#39;[ServiceWorker] Activate&#39;);
+  e.waitUntil(
+    caches.keys().then(function(keyList) {
+      return Promise.all(keyList.map(function(key) {
+        if (key !== cacheName) {
+          console.log(&#39;[ServiceWorker] Removing old cache&#39;, key);
+          return caches.delete(key);
+        }
+      }));
+    })
+  );
+  return self.clients.claim();
+});</code></pre>
+<p>This code ensures that your service worker updates its cache whenever any of the app shell files change. In order for this to work, you&#39;d need to increment the <code>cacheName</code> variable at the top of your service worker file.</p>
+<p>The last statement fixes a corner-case which you can read about in the (optional) information box below.</p>
+<aside class="special"><p>When the app is complete, <code>self.clients.claim()</code> fixes a corner case in which the app wasn&#39;t returning the latest data. You can reproduce the corner case by commenting out the line below and then doing the following steps: 1) load app for first time so that the initial New York City data is shown 2) press the refresh button on the app 3) go offline 4) reload the app. You expect to see the newer NYC data, but you actually see the initial data. This happens because the service worker is not yet activated. <code>self.clients.claim()</code> essentially lets you activate the service worker faster.</p>
+</aside>
+<p>Finally, let&#39;s update the list of files required for the app shell. In the array, we need to include all of the files our app needs, including images, JavaScript, stylesheets, etc. Near the top of your <code>service-worker.js</code> file, replace <code>var filesToCache = [];</code> with the code below:</p>
+<pre><code>var filesToCache = [
+  &#39;/&#39;,
+  &#39;/index.html&#39;,
+  &#39;/scripts/app.js&#39;,
+  &#39;/styles/inline.css&#39;,
+  &#39;/images/clear.png&#39;,
+  &#39;/images/cloudy-scattered-showers.png&#39;,
+  &#39;/images/cloudy.png&#39;,
+  &#39;/images/fog.png&#39;,
+  &#39;/images/ic_add_white_24px.svg&#39;,
+  &#39;/images/ic_refresh_white_24px.svg&#39;,
+  &#39;/images/partly-cloudy.png&#39;,
+  &#39;/images/rain.png&#39;,
+  &#39;/images/scattered-showers.png&#39;,
+  &#39;/images/sleet.png&#39;,
+  &#39;/images/snow.png&#39;,
+  &#39;/images/thunderstorm.png&#39;,
+  &#39;/images/wind.png&#39;
+];</code></pre>
+<aside class="special"><p>Be sure to include all permutations of file names, for example our app is served from <code>index.html</code>, but it may also be requested as <code>/</code> since the server sends <code>index.html</code> when a root folder is requested. You could deal with this in the <code>fetch</code> method, but it would require special casing which may become complex.</p>
+</aside>
+<p>Our app doesn&#39;t work offline quite yet. We&#39;ve cached the app shell components, but we still need to load them from the local cache.</p>
+<h2><strong>Serve the app shell from the cache</strong></h2>
+<p>Service workers provide the ability to intercept requests made from our Progressive Web App and handle them within the service worker. That means we can determine how we want to handle the request and potentially serve our own cached response.</p>
+<p>For example:</p>
+<pre><code>self.addEventListener(&#39;fetch&#39;, function(event) {
+  // Do something interesting with the fetch here
+});</code></pre>
+<p>Let&#39;s now serve the app shell from the cache. Add the following code to the bottom of your <code>service-worker.js</code> file:</p>
+<pre><code>self.addEventListener(&#39;fetch&#39;, function(e) {
+  console.log(&#39;[ServiceWorker] Fetch&#39;, e.request.url);
+  e.respondWith(
+    caches.match(e.request).then(function(response) {
+      return response || fetch(e.request);
+    })
+  );
+});</code></pre>
+<p>Stepping from inside, out, <code>caches.match()</code> evaluates the web request that triggered the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API" target="_blank"><code>fetch</code></a> event, and checks to see if it&#39;s available in the cache. It then either responds with the cached version, or uses <code>fetch</code> to get a copy from the network. The <code>response</code> is passed back to the web page with <code>e.respondWith()</code>.</p>
+<aside class="warning"><p>If you&#39;re not seeing the <code>[ServiceWorker]</code> logging in the console, be sure you&#39;ve changed the <code>cacheName</code> variable and that you&#39;re inspecting the right service worker by opening the Service Worker pane in the Applications panel and clicking <strong>inspect</strong> on the running service worker. If that doesn&#39;t work, see the section on Tips for testing live service workers.</p>
+</aside>
+<h2>Test it out</h2>
+<p>Your app is now offline-capable! Let&#39;s try it out.</p>
+<p>Reload your page and then go to the <strong>Cache Storage</strong> pane on the <strong>Application</strong> panel of DevTools. Right click <strong>Cache Storage</strong>, pick <strong>Refresh Caches</strong>, expand the section and you should see the name of your app shell cache listed on the left-hand side. When you click on your app shell cache you can see all of the resources that it has currently cached.</p>
+<p><img style="max-width: 624.00px" src="img/ab9c361527825fac.png"></p>
+<p>Now, let&#39;s test out offline mode. Go back to the <strong>Service Worker</strong> pane of DevTools and enable the <strong>Offline</strong> checkbox. After enabling it, you should see a little yellow warning icon next to the <strong>Network</strong> panel tab. This indicates that you&#39;re offline.</p>
+<p><img style="max-width: 624.00px" src="img/7656372ff6c6a0f7.png"></p>
+<p>Reload your page and... it works! Kind of, at least. Notice how it loads the initial (fake) weather data.</p>
+<p><img style="max-width: 396.00px" src="img/8a959b48e233bc93.png"></p>
+<p>Check out the <code>else</code> clause in <code>app.getForecast()</code> to understand why the app is able to load the fake data.</p>
+<p>The next step is to modify the app and service worker logic to be able to cache weather data, and return the most recent data from the cache when the app is offline.</p>
+<p><strong>Tip:</strong> To start fresh and clear all saved data (<code>localStorage</code>, <code>indexedDB</code> data, cached files) and remove any service workers, use the Clear storage pane in the Application tab.</p>
+<p><a href="https://weather-pwa-sample.firebaseapp.com/step-06/" target="_blank"><paper-button class="colored" raised>TRY IT</paper-button></a></p>
+<h2><strong>Beware of the edge cases</strong></h2>
+<p>As previously mentioned, this code <strong>must not be used in production</strong> because of the many unhandled edge cases.</p>
+<h3><strong>Cache depends on updating the cache key for every change</strong></h3>
+<p>For example this caching method requires you to update the cache key every time content is changed, otherwise, the cache will not be updated, and the old content will be served. So be sure to change the cache key with every change as you&#39;re working on your project!</p>
+<h3><strong>Requires everything to be redownloaded for every change</strong></h3>
+<p>Another downside is that the entire cache is invalidated and needs to be re-downloaded every time a file changes. That means fixing a simple single character spelling mistake will invalidate the cache and require everything to be downloaded again. Not exactly efficient.</p>
+<h3><strong>Browser cache may prevent the service worker cache from updating</strong></h3>
+<p>There&#39;s another important caveat here. It&#39;s crucial that the HTTPS request made during the install handler goes directly to the network and doesn&#39;t return a response from the browser&#39;s cache. Otherwise the browser may return the old, cached version, resulting in the service worker cache never actually updating!</p>
+<h3><strong>Beware of cache-first strategies in production</strong></h3>
+<p>Our app uses a cache-first strategy, which results in a copy of any cached content being returned without consulting the network. While a cache-first strategy is easy to implement, it can cause challenges in the future. Once the copy of the host page and service worker registration is cached, it can be extremely difficult to change the configuration of the service worker (since the configuration depends on where it was defined), and you could find yourself deploying sites that are extremely difficult to update!</p>
+<h3><strong>How do I avoid these edge cases?</strong></h3>
+<p>So how do we avoid these edge cases? Use a library like <a href="https://github.com/GoogleChrome/sw-precache" target="_blank">sw-precache</a>, which provides fine control over what gets expired, ensures requests go directly to the network and handles all of the hard work for you.</p>
+<h2><strong>Tips for testing live service workers</strong></h2>
+<p>Debugging service workers can be a challenge, and when it involves caching, things can become even more of a nightmare if the cache isn&#39;t updated when you expect it. Between the typical service worker life cycle and bug in your code, you may become quickly frustrated. But don&#39;t. There are some tools you can use to make your life easier.</p>
+<h3><strong>Start Fresh</strong></h3>
+<p>In some cases, you may find yourself loading cached data or that things aren&#39;t updated as you expect. To clear all saved data (localStorage, indexedDB data, cached files) and remove any service workers, use the Clear storage pane in the Application tab.</p>
+<p>Some other tips:</p>
+<ul>
+<li>Once a service worker has been unregistered, it may remain listed until its containing browser window is closed.</li>
+<li>If multiple windows to your app are open, the new service worker will not take effect until they&#39;ve all been reloaded and updated to the latest service worker.</li>
+<li>Unregistering a service worker does not clear the cache, so it may be possible you&#39;ll still get old data if the cache name hasn&#39;t changed.</li>
+<li>If a service worker exists and a new service worker is registered, the new service worker won&#39;t take control until the page is reloaded, unless you take <a href="https://github.com/GoogleChrome/samples/tree/gh-pages/service-worker/immediate-control" target="_blank">immediate control</a>.</li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<html>
+<head>
+<title>Use service workers to cache the forecast data</title>
+</head>
+<body>
+<p>Choosing the right <a href="https://jakearchibald.com/2014/offline-cookbook/" target="_blank">caching strategy</a> for your data is vital and depends on the type of data your app presents. For example, time-sensitive data like weather or stock quotes should be as fresh as possible, while avatar images or article content can be updated less frequently.</p>
+<p>The <a href="https://jakearchibald.com/2014/offline-cookbook/#cache-network-race" target="_blank">cache-first-then-network</a> strategy is ideal for our app. It gets data on screen as quickly as possible, then updates that once the network has returned the latest data. In comparison to network-first-then-cache, the user does not have to wait until the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API" target="_blank">fetch</a> times out to get the cached data.</p>
+<p>Cache-first-then-network means we need to kick off two asynchronous requests, one to the cache and one to the network. Our network request with the app doesn&#39;t need to change much, but we need to modify the service worker to cache the response before returning it.</p>
+<p>Under normal circumstances, the cached data will be returned almost immediately providing the app with recent data it can use. Then, when the network request returns, the app will be updated using the latest data from the network.</p>
+<h2><strong>Intercept the network request and cache the response</strong></h2>
+<p>We need to modify the service worker to intercept requests to the weather API and store their responses in the cache, so we can easily access them later. In the cache-then-network strategy, we expect the network response to be the ‘source of truth&#39;, always providing us with the most recent information. If it can&#39;t, it&#39;s OK to fail because we&#39;ve already retrieved the latest cached data in our app.</p>
+<p>In the service worker, let&#39;s add a <code>dataCacheName</code> so that we can separate our applications data from the app shell. When the app shell is updated and older caches are purged, our data will remain untouched, ready for a super fast load. Keep in mind, if your data format changes in the future, you&#39;ll need a way to handle that and ensure the app shell and content stay in sync.</p>
+<p>Add the following line to the top of your <code>service-worker.js</code> file:</p>
+<pre><code>var dataCacheName = &#39;weatherData-v1&#39;;</code></pre>
+<p>Next, update the <code>activate</code> event handler so that it doesn&#39;t delete the data cache when it cleans up the app shell cache.</p>
+<pre><code>if (key !== cacheName &amp;&amp; key !== dataCacheName) {</code></pre>
+<p>Finally, update the <code>fetch</code> event handler to handle requests to the data API separately from other requests.</p>
+<pre><code>self.addEventListener(&#39;fetch&#39;, function(e) {
+  console.log(&#39;[Service Worker] Fetch&#39;, e.request.url);
+  var dataUrl = &#39;https://query.yahooapis.com/v1/public/yql&#39;;
+  if (e.request.url.indexOf(dataUrl) &gt; -1) {
+    /*
+     * When the request URL contains dataUrl, the app is asking for fresh
+     * weather data. In this case, the service worker always goes to the
+     * network and then caches the response. This is called the &#34;Cache then
+     * network&#34; strategy:
+     * https://jakearchibald.com/2014/offline-cookbook/#cache-then-network
+     */
+    e.respondWith(
+      caches.open(dataCacheName).then(function(cache) {
+        return fetch(e.request).then(function(response){
+          cache.put(e.request.url, response.clone());
+          return response;
+        });
+      })
+    );
+  } else {
+    /*
+     * The app is asking for app shell files. In this scenario the app uses the
+     * &#34;Cache, falling back to the network&#34; offline strategy:
+     * https://jakearchibald.com/2014/offline-cookbook/#cache-falling-back-to-network
+     */
+    e.respondWith(
+      caches.match(e.request).then(function(response) {
+        return response || fetch(e.request);
+      })
+    );
+  }
+});
+</code></pre>
+<p>The code intercepts the request and checks if the URL starts with the address of the weather API. If it does we&#39;ll use <a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API" target="_blank"><code>fetch</code></a> to make the request. Once the response is returned, our code opens the cache, clones the response, stores it in the cache, and finally returns the response to the original requestor.</p>
+<p>Our app won&#39;t work offline quite yet. We&#39;ve implemented caching and retrieval for the app shell, but even though we&#39;re caching the data, the app doesn&#39;t yet check the cache to see if it has any weather data. </p>
+<h2><strong>Making the requests</strong></h2>
+<p>As mentioned previously, the app needs to kick off two asynchronous requests, one to the cache and one to the network. The app uses the <code>caches</code> object available in <code>window</code> to access the cache and retrieve the latest data. This is an excellent example of progressive enhancement as the <code>caches</code> object may not be available in all browsers, and if it&#39;s not the network request should still work.</p>
+<p>To do this, we need to:</p>
+<ol type="1" start="1">
+<li>Check if the <code>caches</code> object is available in the global <code>window</code> object.</li>
+<li>Request data from the cache. </li>
+</ol>
+<ul>
+<li>If the server request is still outstanding, update the app with the cached data.</li>
+</ul>
+<ol type="1" start="3">
+<li>Request data from the server.</li>
+</ol>
+<ul>
+<li>Save the data for quick access later.</li>
+<li>Update the app with the fresh data from the server.</li>
+</ul>
+<h3><strong>Get data from the cache</strong></h3>
+<p>Next, we need to check if the <code>caches</code> object exists and request the latest data from it. Find the <code>TODO add cache logic here</code> comment in <code>app.getForecast()</code>, and then add the code below under the comment.</p>
+<pre><code>    if (&#39;caches&#39; in window) {
+      /*
+       * Check if the service worker has already cached this city&#39;s weather
+       * data. If the service worker has the data, then display the cached
+       * data while the app fetches the latest data.
+       */
+      caches.match(url).then(function(response) {
+        if (response) {
+          response.json().then(function updateFromCache(json) {
+            var results = json.query.results;
+            results.key = key;
+            results.label = label;
+            results.created = json.query.created;
+            app.updateForecastCard(results);
+          });
+        }
+      });
+    }
+</code></pre>
+<p>Our weather app now makes two asynchronous requests for data, one from the <code>cache</code> and one via an XHR. If there&#39;s data in the cache, it&#39;ll be returned and rendered extremely quickly (tens of milliseconds) and update the card only if the XHR is still outstanding. Then, when the XHR responds, the card will be updated with the freshest data direct from the weather API.</p>
+<p>Notice how the cache request and the XHR request both end with a call to update the forecast card. How does the app know whether it&#39;s displaying the latest data? This is handled in the following code from <code>app.updateForecastCard</code>:</p>
+<pre><code>    var cardLastUpdatedElem = card.querySelector(&#39;.card-last-updated&#39;);
+    var cardLastUpdated = cardLastUpdatedElem.textContent;
+    if (cardLastUpdated) {
+      cardLastUpdated = new Date(cardLastUpdated);
+      // Bail if the card has more recent data then the data
+      if (dataLastUpdated.getTime() &lt; cardLastUpdated.getTime()) {
+        return;
+      }
+    }</code></pre>
+<p>Every time that a card is updated, the app stores the timestamp of the data on a hidden attribute on the card. The app just bails if the timestamp that already exists on the card is newer than the data that was passed to the function.</p>
+<h2><strong>Test it out</strong></h2>
+<p>The app should be completely offline-functional now. Save a couple of cities and press the refresh button on the app to get fresh weather data, and then go offline and reload the page. </p>
+<p>Then go to the <strong>Cache Storage</strong> pane on the <strong>Application</strong> panel of DevTools. Expand the section and you should see the name of your app shell and data cache listed on the left-hand side. Opening the data cache should should the data stored for each city.</p>
+<p><img style="max-width: 624.00px" src="img/cf095c2153306fa7.png"></p>
+<p><a href="https://weather-pwa-sample.firebaseapp.com/step-07/" target="_blank"><paper-button class="colored" raised>TRY IT</paper-button></a></p>
+</body>
+</html>
